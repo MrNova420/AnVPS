@@ -15,8 +15,11 @@ WARNINGS=0
 check_cpu() {
     local load=$(cat /proc/loadavg 2>/dev/null | cut -d' ' -f1 || echo "0")
     local cores=$(nproc 2>/dev/null || echo 1)
-    local threshold=$(echo "$cores * 0.9" | bc 2>/dev/null || echo "$cores")
-    if [ "$(echo "$load > $threshold" | bc 2>/dev/null)" = "1" ]; then
+    local load_int=${load/./} 2>/dev/null || load_int=0
+    local threshold=$((cores * 9))
+    load_int=${load_int##0}
+    load_int=${load_int:-0}
+    if [ "${#load_int}" -gt 2 ]; then
         RESULTS+=("WARN: High CPU load: $load (cores: $cores)")
         WARNINGS=$((WARNINGS + 1))
     else
@@ -79,8 +82,10 @@ check_services() {
 
 check_network() {
     local ports=("7022" "7080" "7443" "7444")
+    local netcmd="ss -tlnp"
+    if ! command -v ss &>/dev/null; then netcmd="netstat -tlnp"; fi
     for port in "${ports[@]}"; do
-        if ss -tlnp 2>/dev/null | grep -q ":${port} "; then
+        if $netcmd 2>/dev/null | grep -q ":${port} "; then
             PASSED=$((PASSED + 1))
         fi
     done
@@ -97,8 +102,9 @@ check_temp() {
     if [ -d "/sys/class/thermal" ]; then
         for zone in /sys/class/thermal/thermal_zone*/temp; do
             [ -f "$zone" ] || continue
-            local temp=$(cat "$zone" 2>/dev/null | awk '{print $1/1000}')
-            if [ -n "$temp" ] && [ "$(echo "$temp > 70" | bc 2>/dev/null)" = "1" ]; then
+            local raw=$(cat "$zone" 2>/dev/null)
+            local temp=$((raw / 1000)) 2>/dev/null || continue
+            if [ "$temp" -gt 70 ] 2>/dev/null; then
                 RESULTS+=("WARN: Temperature ${temp}C — throttling risk")
                 WARNINGS=$((WARNINGS + 1))
             fi
@@ -109,10 +115,20 @@ check_temp() {
 
 auto_heal() {
     local healed=0
+    local max_restarts=5
+    local restart_count_file="${ANVPS_DIR}/tmp/.restart_count"
+    mkdir -p "${ANVPS_DIR}/tmp"
+    local total_restarts=0
+    [ -f "$restart_count_file" ] && total_restarts=$(cat "$restart_count_file")
+    if [ "$total_restarts" -ge "$max_restarts" ]; then
+        log "Max restarts ($max_restarts) reached — skipping auto-heal to avoid crash loop"
+        return
+    fi
     for pidf in "${SERVICES_DIR}"/*.pid; do
+        [ -f "$pidf" ] || continue
         local name=$(basename "$pidf" .pid)
         local pid=$(cat "$pidf" 2>/dev/null)
-        if [ -f "$pidf" ] && ! kill -0 "$pid" 2>/dev/null; then
+        if ! kill -0 "$pid" 2>/dev/null; then
             log "Auto-healing $name..."
             rm -f "$pidf"
             if [ -f "${ANVPS_DIR}/src/core/${name}.sh" ]; then
@@ -122,7 +138,11 @@ auto_heal() {
         fi
     done
     if [ "$healed" -gt 0 ]; then
-        log "Auto-healed $healed service(s)"
+        total_restarts=$((total_restarts + healed))
+        echo "$total_restarts" > "$restart_count_file"
+        log "Auto-healed $healed service(s) (total restarts: $total_restarts)"
+    else
+        rm -f "$restart_count_file" 2>/dev/null
     fi
 }
 

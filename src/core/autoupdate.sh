@@ -62,10 +62,10 @@ update_self() {
         git pull 2>/dev/null && log "AnVPS updated via git" || log "No git update needed"
         cd "$OLDPWD"
     elif command -v curl &>/dev/null; then
-        local latest=$(curl -s https://api.github.com/repos/anvps/anserver/releases/latest 2>/dev/null | grep tag_name | cut -d'"' -f4 || echo "")
+        local latest=$(curl -s https://api.github.com/repos/MrNova420/AnVPS/releases/latest 2>/dev/null | grep tag_name | cut -d'"' -f4 || echo "")
         if [ -n "$latest" ] && [ "$latest" != "v${ANVPS_VERSION:-}" ]; then
             log "New version available: $latest (current: v${ANVPS_VERSION:-})"
-            local url="https://github.com/anvps/anserver/archive/refs/tags/${latest}.tar.gz"
+            local url="https://github.com/MrNova420/AnVPS/archive/refs/tags/${latest}.tar.gz"
             curl -sL "$url" -o "${tmp_dir}/update.tar.gz" 2>/dev/null && {
                 tar xzf "${tmp_dir}/update.tar.gz" -C "$tmp_dir"
                 cp -r "${tmp_dir}/anserver-"*/* "${ANVPS_DIR}/" 2>/dev/null || true

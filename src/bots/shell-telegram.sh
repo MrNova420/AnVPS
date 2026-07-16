@@ -86,7 +86,10 @@ poll() {
             for i in $(seq 0 $((count - 1))); do
                 [ -z "${ids[$i]:-}" ] && continue
                 [ "${ids[$i]}" -ge "$LAST_UPDATE" ] && LAST_UPDATE=$((ids[$i] + 1))
-                process_update "${texts[$i]:-}" "${chats[$i]:-}"
+                local text="${texts[$i]:-}"
+                local chat="${chats[$i]:-}"
+                [ -z "$text" ] && [ -z "$chat" ] && continue
+                process_update "$text" "$chat"
             done
         fi
         sleep 3

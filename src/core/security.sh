@@ -84,8 +84,11 @@ cmd_scan() {
         local issues_found=0
         for dir in "${ANVPS_DIR}/etc" "${ANVPS_DIR}/data/ssh"; do
             if [ -d "$dir" ]; then
-                local perms=$(stat -c "%a" "$dir" 2>/dev/null)
-                if [ "$perms" != "700" ] && [ "$perms" != "750" ]; then
+                local perms=""
+                if command -v stat &>/dev/null; then
+                    perms=$(stat -c "%a" "$dir" 2>/dev/null || stat -f "%Lp" "$dir" 2>/dev/null || echo "")
+                fi
+                if [ -n "$perms" ] && [ "$perms" != "700" ] && [ "$perms" != "750" ]; then
                     echo "WARN: Permissions on $dir: $perms" >> "$report"
                     issues=$((issues + 1))
                 fi
@@ -95,9 +98,9 @@ cmd_scan() {
 
     check_updates() {
         if command -v apt &>/dev/null; then
-            local updates=$(apt list --upgradable 2>/dev/null | wc -l)
-            if [ "$updates" -gt 1 ]; then
-                echo "INFO: $((updates - 1)) package updates available" >> "$report"
+            local updates=$(apt list --upgradable 2>/dev/null | grep -c upgradable || echo 0)
+            if [ "$updates" -gt 0 ]; then
+                echo "INFO: $updates package updates available" >> "$report"
             fi
         fi
     }

@@ -46,15 +46,27 @@ traffic_shaping() {
 
 decoy_services() {
     log "Starting decoy services on standard ports..."
+    local nc_cmd=""
     if command -v nc &>/dev/null; then
-        nc -l -p 22 -q 1 -c 'echo SSH-2.0-OpenSSH_8.9p1 Ubuntu' >/dev/null 2>&1 &
-        nc -l -p 80 -q 1 -c 'echo -e "HTTP/1.1 200 OK\r\n\r\n<html/>"' >/dev/null 2>&1 &
-        nc -l -p 443 -q 1 -c 'echo -e "HTTP/1.1 200 OK\r\n\r\n<html/>"' >/dev/null 2>&1 &
-        log "Decoy services active on ports 22, 80, 443"
+        nc_cmd="nc"
+    elif command -v netcat &>/dev/null; then
+        nc_cmd="netcat"
+    fi
+    if [ -n "$nc_cmd" ]; then
+        if echo "" | "$nc_cmd" -l -p 22 -q 1 >/dev/null 2>/dev/null; then
+            while true; do echo "SSH-2.0-OpenSSH_8.9p1 Ubuntu" | "$nc_cmd" -l -p 22 -q 1 >/dev/null 2>&1; done &
+            while true; do printf "HTTP/1.1 200 OK\r\n\r\n<html/>\r\n" | "$nc_cmd" -l -p 80 -q 1 >/dev/null 2>&1; done &
+            while true; do printf "HTTP/1.1 200 OK\r\n\r\n<html/>\r\n" | "$nc_cmd" -l -p 443 -q 1 >/dev/null 2>&1; done &
+            log "Decoy services active on ports 22, 80, 443"
+        else
+            log "Cannot bind decoy ports — not root or ports in use"
+        fi
     fi
 }
 
 scheduled_availability() {
+    local cfg="${ANVPS_DIR}/etc/anvps.conf"
+    [ -f "$cfg" ] && source "$cfg"
     local start_hour="${ANVPS_STEALTH_START_HOUR:-9}"
     local end_hour="${ANVPS_STEALTH_END_HOUR:-17}"
     local current=$(date +%H)

@@ -84,7 +84,7 @@ cmd_service() {
             elif [ "$action" = "stop" ]; then
                 if [ -f "$pid_file" ]; then local pid=$(cat "$pid_file"); kill "$pid" 2>/dev/null && rm -f "$pid_file" && log "$name stopped"
                 else warn "$name not running"; fi
-            else cmd_service stop "$@"; sleep 1; cmd_service start "$@"; fi
+            else cmd_service stop "$name"; sleep 1; cmd_service start "$name"; fi
             ;;
         setup) log "Running initial service setup..."; for svc in ssh web database files code-server; do local installer="${ANVPS_SRC}/setup/modules/${svc}.sh"; [ -f "$installer" ] && source "$installer" && "install_${svc}" "${ENV_TYPE:-termux}" "$ANVPS_DIR" 2>/dev/null || true; done; log "Initial setup complete" ;;
         *) echo "Usage: anvps service {list|install|start|stop|restart|setup} [name]" ;;
@@ -217,6 +217,11 @@ cmd_tier() {
     [ -f "${ANVPS_SRC}/core/lightweight.sh" ] && bash "${ANVPS_SRC}/core/lightweight.sh" "$action" "$@" || err "Lightweight module not installed"
 }
 
+cmd_fail2ban() {
+    local action="${1:-status}"; shift 1 2>/dev/null || true
+    [ -f "${ANVPS_SRC}/core/fail2ban.sh" ] && bash "${ANVPS_SRC}/core/fail2ban.sh" "$action" "$@" || err "fail2ban module not installed"
+}
+
 cmd_config_tier() {
     local tier="${1:-}"
     if [ -z "$tier" ]; then cmd_tier info; return; fi
@@ -235,6 +240,8 @@ cmd_config() {
         show) [ -f "$cfg" ] && cat "$cfg" || echo "No config found" ;;
         get) local key="${2:-}"; [ -n "$key" ] && grep "^${key}=" "$cfg" 2>/dev/null | cut -d= -f2- || err "Specify key" ;;
         set) local key="${2:-}"; local val="${3:-}"; [ -n "$key" ] && [ -n "$val" ] || { err "Usage: config set KEY VALUE"; return 1; }
+            local valid_keys="ANVPS_TIER ANVPS_SSH_TYPE ANVPS_SSH_PORT ANVPS_HTTPD_TYPE ANVPS_BOT_TYPE ANVPS_MONITORING ANVPS_WEB_PORT ANVPS_HTTPS_PORT ANVPS_AUTO_UPDATE ANVPS_UPDATE_INTERVAL ANVPS_AUTO_BACKUP ANVPS_BACKUP_INTERVAL ANVPS_BACKUP_RETENTION ANVPS_LOG_LEVEL ANVPS_LOG_RETENTION_DAYS ANVPS_WATCHDOG ANVPS_WATCHDOG_INTERVAL ANVPS_MONITOR_INTERVAL ANVPS_TUNNEL_TYPE ANVPS_STEALTH ANVPS_STEALTH_START_HOUR ANVPS_STEALTH_END_HOUR ANVPS_OBFUSCATE ANVPS_OBFUSCATE_INTERVAL ANVPS_ENCRYPT_STORAGE ANVPS_TAMPER_DETECTION ANVPS_TAMPER_MAX_FAILED ANVPS_DEAD_MAN_DAYS ANVPS_VPN_KILLSWITCH ANVPS_TOR_ENABLED ANVPS_TIMEZONE ANVPS_PORT_BASE ANVPS_VPN_IFACE ANVPS_VPN_PORT ANVPS_MLOCK_MEMORY"
+            if ! echo "$valid_keys" | grep -qw "$key"; then local suggestion=$(echo "$valid_keys" | tr ' ' '\n' | grep -i "${key:0:4}" | head -1); [ -n "$suggestion" ] && err "Unknown key '$key' — did you mean '$suggestion'?" || err "Unknown key '$key'. Valid keys: ANVPS_TIER, ANVPS_SSH_PORT, ..."; return 1; fi
             if grep -q "^${key}=" "$cfg" 2>/dev/null; then sed -i "s/^${key}=.*/${key}=\"${val}\"/" "$cfg"
             else echo "${key}=\"${val}\"" >> "$cfg"; fi; log "${key}=${val}" ;;
         load) local profile="${2:-full}"; local pf="${ANVPS_DIR}/etc/profiles/${profile}.conf"
@@ -289,9 +296,11 @@ cmd_help() {
     echo "    obfuscate           Device obfuscation (all|hostname|ssh|mac|http|status)"
     echo "    encrypt             Encrypted storage (init|unmount|status)"
     echo "    tamper              Tamper detection (init|verify|check|status)"
+    echo "    fail2ban            Fail2ban (start|stop|restart|status)"
     echo ""
     echo "  Config:"; echo "    config              Configuration (show|get|set|load)"
     echo "    tier                RAM tier detection (detect|info|select-ssh|select-httpd)"
+    echo "    uninstall           Fully remove AnVPS"
     echo "    help                This help"
     echo "    version             Show version"
 }
@@ -299,16 +308,27 @@ cmd_help() {
 # ──────────────────────────────────────────────
 # MAIN
 # ──────────────────────────────────────────────
+cmd_uninstall() {
+    if [ -f "${ANVPS_DIR}/../setup/uninstall.sh" ]; then
+        bash "${ANVPS_DIR}/../setup/uninstall.sh"
+    elif [ -f "$(dirname "$0")/../../setup/uninstall.sh" ]; then
+        bash "$(dirname "$0")/../../setup/uninstall.sh"
+    else
+        warn "Uninstaller not found — remove ${ANVPS_DIR} manually"
+    fi
+}
+
 main() {
     ensure_dir; load_config
     [ $# -eq 0 ] && { cmd_status; return; }
     local cmd="${1:-}"; shift 1 2>/dev/null || true
     case "$cmd" in
-        status|service|monitor|update|backup|tunnel|logs|doctor|version|help)
+        status|service|monitor|update|backup|tunnel|logs|doctor|version|help|fail2ban)
             "cmd_$cmd" "$@" ;;
         security|stealth|obfuscate|encrypt|tor|tamper|killswitch|tier)
             "cmd_$cmd" "$@" ;;
         config) cmd_config "$@" ;;
+        uninstall) cmd_uninstall ;;
         --help|-h) cmd_help ;;
         *) err "Unknown: $cmd"; echo ""; cmd_help ;;
     esac

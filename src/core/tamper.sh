@@ -60,7 +60,7 @@ verify_integrity() {
 check_failed_auth() {
     local logfile="${ANVPS_DIR}/logs/ssh.log"
     [ ! -f "$logfile" ] && return
-    local recent=$(grep -c "Failed password\|auth failure\|Bad protocol" "$logfile" 2>/dev/null || echo 0)
+    local recent=$(grep -cE "Failed password|auth failure|Bad protocol" "$logfile" 2>/dev/null || echo 0)
     FAILED_COUNT=$recent
     if [ "$recent" -gt "$MAX_FAILED_AUTH" ]; then
         log "BRUTE FORCE DETECTED: $recent failed auth attempts"

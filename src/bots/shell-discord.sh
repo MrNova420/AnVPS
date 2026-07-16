@@ -93,7 +93,9 @@ poll() {
                 [ "${ids[$i]}" = "$LAST_MESSAGE_ID" ] && continue
                 [ "${authors[$i]:-}" = "AnVPS Bot" ] && continue
                 LAST_MESSAGE_ID="${ids[$i]}"
-                process_command "${contents[$i]:-}"
+                local content="${contents[$i]:-}"
+                [ -z "$content" ] && continue
+                process_command "$content"
             done
         fi
         sleep 3

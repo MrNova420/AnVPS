@@ -37,15 +37,30 @@ obfuscate_ssh_keys() {
 
 obfuscate_mac() {
     if [ "$(id -u)" != "0" ]; then echo "MAC randomization requires root"; return 1; fi
-    if ! command -v macchanger &>/dev/null; then echo "macchanger not installed"; return 1; fi
-    for iface in /sys/class/net/wlan*; do
-        [ -d "$iface" ] || continue
-        local name=$(basename "$iface")
-        ip link set "$name" down 2>/dev/null || true
-        macchanger -r "$name" 2>/dev/null || true
-        ip link set "$name" up 2>/dev/null || true
-        echo "MAC randomized for $name"
-    done
+    local changed=0
+    if command -v macchanger &>/dev/null; then
+        for iface in /sys/class/net/wlan* /sys/class/net/eth* /sys/class/net/usb* /sys/class/net/enp* /sys/class/net/enx*; do
+            [ -d "$iface" ] || continue
+            local name=$(basename "$iface")
+            ip link set "$name" down 2>/dev/null || true
+            macchanger -r "$name" 2>/dev/null || true
+            ip link set "$name" up 2>/dev/null || true
+            echo "MAC randomized for $name"
+            changed=1
+        done
+    elif command -v ip &>/dev/null; then
+        for iface in /sys/class/net/wlan* /sys/class/net/eth* /sys/class/net/usb* /sys/class/net/enp* /sys/class/net/enx*; do
+            [ -d "$iface" ] || continue
+            local name=$(basename "$iface")
+            local new_mac=$(printf '02:%02x:%02x:%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))
+            ip link set "$name" down 2>/dev/null || true
+            ip link set "$name" address "$new_mac" 2>/dev/null || true
+            ip link set "$name" up 2>/dev/null || true
+            echo "MAC randomized for $name -> $new_mac"
+            changed=1
+        done
+    fi
+    if [ "$changed" -eq 0 ]; then echo "No interfaces found or no tools available"; fi
 }
 
 obfuscate_http_headers() {

@@ -86,10 +86,30 @@ status() {
     [ -n "$tool" ] && echo "Tool: $tool" || echo "Tool: none"
 }
 
+setup() {
+    local tool=$(detect_tool)
+    if [ -n "$tool" ]; then
+        echo "Encryption tool already installed: $tool"
+        return 0
+    fi
+    if command -v apt &>/dev/null; then
+        sudo apt install -y gocryptfs 2>/dev/null || sudo apt install -y encfs 2>/dev/null || true
+    elif command -v pkg &>/dev/null; then
+        pkg install -y gocryptfs 2>/dev/null || pkg install -y encfs 2>/dev/null || true
+    fi
+    tool=$(detect_tool)
+    if [ -n "$tool" ]; then
+        echo "Installed: $tool"
+    else
+        echo "No encryption tool available — install gocryptfs or encfs manually"
+    fi
+}
+
 case "${1:-status}" in
     init|mount|start) init_encrypted ;;
     umount|unmount|stop) unmount ;;
     restart) unmount; sleep 1; init_encrypted ;;
     status) status ;;
-    *) echo "Usage: $0 {init|unmount|restart|status}" ;;
+    setup) setup ;;
+    *) echo "Usage: $0 {init|unmount|restart|status|setup}" ;;
 esac

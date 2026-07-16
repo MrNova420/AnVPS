@@ -43,9 +43,23 @@ start() {
 }
 
 start_shell_httpd() {
+    local nc_cmd="nc"
+    if command -v nc &>/dev/null; then
+        nc_cmd="nc"
+    elif command -v netcat &>/dev/null; then
+        nc_cmd="netcat"
+    fi
+    local nc_args=""
+    if echo "" | "$nc_cmd" -l -p "$WEB_PORT" -q 1 2>/dev/null; then
+        nc_args="-l -p $WEB_PORT -q 1"
+    elif echo "" | "$nc_cmd" -l "$WEB_PORT" 2>/dev/null; then
+        nc_args="-l $WEB_PORT"
+    elif echo "" | "$nc_cmd" -l -p "$WEB_PORT" 2>/dev/null; then
+        nc_args="-l -p $WEB_PORT"
+    fi
     while true; do
-        echo -e "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n$(cat "${WWW_DIR}/index.html" 2>/dev/null || echo '<h1>AnVPS</h1>')" \
-            | nc -l -p "$WEB_PORT" -q 1 >> "$LOG_FILE" 2>&1 || true
+        printf "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n%s" "$(cat "${WWW_DIR}/index.html" 2>/dev/null || echo '<h1>AnVPS</h1>')" \
+            | "$nc_cmd" $nc_args >> "$LOG_FILE" 2>&1 || true
     done
 }
 

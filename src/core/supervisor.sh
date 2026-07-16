@@ -27,12 +27,23 @@ register_service() {
 load_services() {
     SERVICES=()
 
-    register_service "sshd" "${ANVPS_SRC}/core/ssh.sh start"
-    if [ -f "${ANVPS_SRC}/core/web-fallback.sh" ]; then
-        register_service "web" "${ANVPS_SRC}/core/web-fallback.sh"
+    local cfg="${ANVPS_DIR}/etc/anvps.conf"
+    [ -f "$cfg" ] && source "$cfg"
+    local ssh_type="${ANVPS_SSH_TYPE:-auto}"
+    if [ "$ssh_type" = "dropbear" ] || [ "$ssh_type" = "auto" ] && command -v dropbear &>/dev/null; then
+        register_service "ssh" "${ANVPS_SRC}/core/dropbear.sh start"
+    else
+        register_service "ssh" "${ANVPS_SRC}/core/ssh.sh start"
+    fi
+
+    if [ -f "${ANVPS_SRC}/core/httpd.sh" ]; then
+        register_service "web" "${ANVPS_SRC}/core/httpd.sh start"
     fi
     if [ -f "${ANVPS_SRC}/core/file-server.py" ]; then
         register_service "files" "python3 ${ANVPS_SRC}/core/file-server.py"
+    fi
+    if [ -f "${ANVPS_SRC}/core/fail2ban.sh" ]; then
+        register_service "fail2ban" "${ANVPS_SRC}/core/fail2ban.sh start"
     fi
 
     local custom_services="${ANVPS_DIR}/etc/services.conf"

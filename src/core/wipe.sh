@@ -85,10 +85,14 @@ device_factory_reset() {
         warn "Factory reset requires root — skipping"
         return
     fi
-    if [ -f "/system/bin/recovery" ]; then
+    if [ -f "/system/build.prop" ]; then
         log "Triggering factory reset..."
         sync
-        setprop sys.powerctl reboot,recovery 2>/dev/null || true
+        command -v setprop &>/dev/null && setprop sys.powerctl reboot,recovery 2>/dev/null || true
+    elif [ -f "/system/bin/recovery" ]; then
+        log "Recovery binary found but not Android — skipping setprop"
+    else
+        warn "Not an Android device — factory reset not supported"
     fi
 }
 

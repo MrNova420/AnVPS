@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ANVPS_DIR="${HOME}/.anvps"
-ANVPS_REPO="https://github.com/anvps/anserver"
-ANVPS_BRANCH="main"
+ANVPS_REPO="https://github.com/MrNova420/AnVPS"
+ANVPS_BRANCH="master"
 ANVPS_VERSION="1.0.0"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'

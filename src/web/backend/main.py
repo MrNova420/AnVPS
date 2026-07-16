@@ -122,7 +122,7 @@ def save_config(data: dict):
     with open(config_file, "w") as f:
         for k, v in data.items():
             f.write(f'{k}="{v}"\n')
-    run_cmd("source /dev/stdin", shell=False)  # reload hint
+    run_cmd(":", shell=True)  # noop — config persisted to disk
     return {"status": "ok"}
 
 @app.get("/api/storage")
