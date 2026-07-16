@@ -1,0 +1,317 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ANVPS_VERSION="1.0.0"
+ANVPS_DIR="${HOME}/.anvps"
+ANVPS_SRC="${ANVPS_DIR}/src"
+
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+log()  { echo -e "${GREEN}[-]${NC} $1"; }
+warn() { echo -e "${YELLOW}[!]${NC} $1"; }
+err()  { echo -e "${RED}[x]${NC} $1"; }
+info() { echo -e "${CYAN}[i]${NC} $1"; }
+
+ensure_dir() { mkdir -p "${ANVPS_DIR}"/{etc,data,logs,services,backup,tmp,ssl,tunnels}; }
+
+load_config() {
+    if [ -f "${ANVPS_DIR}/etc/anvps.conf" ]; then source "${ANVPS_DIR}/etc/anvps.conf"; fi
+    : "${ANVPS_SSH_PORT:=7022}" "${ANVPS_WEB_PORT:=7080}" "${ANVPS_HTTPS_PORT:=7443}" "${ANVPS_PORT_BASE:=7000}"
+}
+
+# ──────────────────────────────────────────────
+# STATUS
+# ──────────────────────────────────────────────
+cmd_status() {
+    load_config; ensure_dir
+    echo ""; echo "  AnVPS v${ANVPS_VERSION} — System Status"; echo "  $(printf '%0.s-' {1..40})"; echo ""
+    echo "  SYSTEM"; echo "  Uptime:    $(uptime -p 2>/dev/null || echo 'N/A')"
+    echo "  Memory:    $(free -h 2>/dev/null | grep Mem | awk '{print $3"/"$2}' || echo 'N/A')"
+    echo "  Storage:   $(df -h "${ANVPS_DIR}" 2>/dev/null | tail -1 | awk '{print $3"/"$2}' || echo 'N/A')"
+    echo "  CPU Load:  $(cat /proc/loadavg 2>/dev/null | cut -d' ' -f1-3 || echo 'N/A')"
+    echo ""; echo "  SERVICES"; local running=0
+    for svc in "${ANVPS_DIR}/services"/*.pid; do
+        [ -f "$svc" ] || continue; local name=$(basename "$svc" .pid); local pid=$(cat "$svc" 2>/dev/null)
+        if kill -0 "$pid" 2>/dev/null; then echo "  ${name}: running (PID $pid)"; running=$((running+1)); else echo "  ${name}: stopped"; fi
+    done; [ "$running" -eq 0 ] && echo "  (no services running)"
+    echo ""; echo "  NETWORK"
+    echo "  SSH:       port ${ANVPS_SSH_PORT} ($(ss -tlnp 2>/dev/null | grep -q ":${ANVPS_SSH_PORT} " && echo active || echo inactive))"
+    echo "  Web:       port ${ANVPS_WEB_PORT} ($(ss -tlnp 2>/dev/null | grep -q ":${ANVPS_WEB_PORT} " && echo active || echo inactive))"
+    echo ""; echo "  SECURITY"
+    [ -f "${ANVPS_DIR}/etc/.stealth_enabled" ] && echo "  Stealth:   ACTIVE" || echo "  Stealth:   inactive"
+    [ -f "${ANVPS_DIR}/etc/.obfuscated" ] && echo "  Obfuscate: ACTIVE" || echo "  Obfuscate: inactive"
+    echo ""
+}
+
+# ──────────────────────────────────────────────
+# SERVICE
+# ──────────────────────────────────────────────
+cmd_service() {
+    local action="${1:-list}"; shift 1 2>/dev/null || true; load_config
+    case "$action" in
+        list)
+            echo "Available services:"
+            echo "  ssh/dropbear — SSH server (port ${ANVPS_SSH_PORT})"
+            echo "  web          — Web server (port ${ANVPS_WEB_PORT})"
+            echo "  database     — Database (MySQL/PostgreSQL/SQLite)"
+            echo "  code-server  — VS Code in browser"
+            echo "  files        — File server (port ${ANVPS_FILE_PORT:-7444})"
+            echo "  docker       — Container support"
+            echo "  vpn          — WireGuard VPN"
+            echo "  tunnel       — Cloudflare/ngrok/bore tunnels"
+            echo "  tor          — Tor gateway"
+            echo "  encrypt      — Encrypted storage"
+            echo "  telegram-bot — Telegram bot (shell)"
+            echo "  discord-bot  — Discord bot (shell)"
+            echo ""
+            echo "Running:"; local any=false
+            for pidf in "${ANVPS_DIR}/services"/*.pid; do
+                [ -f "$pidf" ] || continue; local name=$(basename "$pidf" .pid); local pid=$(cat "$pidf")
+                kill -0 "$pid" 2>/dev/null && echo "  * $name (PID $pid)" && any=true
+            done; $any || echo "  (none)"
+            ;;
+        install)
+            local name="${1:-}"
+            if [ -z "$name" ]; then err "Specify a service"; return 1; fi
+            local installer="${ANVPS_SRC}/setup/modules/${name}.sh"
+            if [ -f "$installer" ]; then source "$installer"; "install_${name}" "${ENV_TYPE:-termux}" "$ANVPS_DIR"
+            else err "No installer for '$name'"; fi
+            ;;
+        start|stop|restart)
+            local name="${1:-}"; local svc_script="${ANVPS_SRC}/core/${name}.sh"; local pid_file="${ANVPS_DIR}/services/${name}.pid"
+            if [ "$action" = "start" ]; then
+                if [ -f "$svc_script" ]; then bash "$svc_script" start 2>/dev/null && log "$name started" || warn "Failed to start $name"
+                else warn "No script for $name"; fi
+            elif [ "$action" = "stop" ]; then
+                if [ -f "$pid_file" ]; then local pid=$(cat "$pid_file"); kill "$pid" 2>/dev/null && rm -f "$pid_file" && log "$name stopped"
+                else warn "$name not running"; fi
+            else cmd_service stop "$@"; sleep 1; cmd_service start "$@"; fi
+            ;;
+        setup) log "Running initial service setup..."; for svc in ssh web database files code-server; do local installer="${ANVPS_SRC}/setup/modules/${svc}.sh"; [ -f "$installer" ] && source "$installer" && "install_${svc}" "${ENV_TYPE:-termux}" "$ANVPS_DIR" 2>/dev/null || true; done; log "Initial setup complete" ;;
+        *) echo "Usage: anvps service {list|install|start|stop|restart|setup} [name]" ;;
+    esac
+}
+
+# ──────────────────────────────────────────────
+# MONITOR
+# ──────────────────────────────────────────────
+cmd_monitor() {
+    load_config; local delay="${1:-2}"
+    while true; do clear 2>/dev/null || true
+        echo "  AnVPS Monitor — $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "  $(printf '%0.s-' {1..40})"; echo ""
+        echo "  CPU:    $(cat /proc/loadavg 2>/dev/null | cut -d' ' -f1-3 || echo 'N/A')"
+        echo "  Memory: $(free -h 2>/dev/null | grep Mem | awk '{print $3"/"$2}' || echo 'N/A')"
+        echo "  Disk:   $(df -h "${ANVPS_DIR}" 2>/dev/null | tail -1 | awk '{print $3"/"$2" ("$5")"}' || echo 'N/A')"
+        echo ""; echo "  Services:"
+        for pidf in "${ANVPS_DIR}/services"/*.pid; do
+            [ -f "$pidf" ] || continue; local name=$(basename "$pidf" .pid); local pid=$(cat "$pidf" 2>/dev/null)
+            if kill -0 "$pid" 2>/dev/null; then local mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{printf "%.1fM", $1/1024}' || echo '?'); echo "  * $name (PID $pid, $mem)"; fi
+        done; echo ""; sleep "$delay"
+    done
+}
+
+# ──────────────────────────────────────────────
+# UPDATE
+# ──────────────────────────────────────────────
+cmd_update() { [ -f "${ANVPS_SRC}/core/autoupdate.sh" ] && bash "${ANVPS_SRC}/core/autoupdate.sh" || warn "Not found"; }
+
+# ──────────────────────────────────────────────
+# BACKUP
+# ──────────────────────────────────────────────
+cmd_backup() {
+    local action="${1:-create}"; local backup_dir="${ANVPS_DIR}/backup"; mkdir -p "$backup_dir"
+    case "$action" in
+        create) local ts=$(date '+%Y%m%d_%H%M%S'); local file="${backup_dir}/anvps_backup_${ts}.tar.gz"
+            tar czf "$file" -C "$ANVPS_DIR" --exclude="backup" --exclude="tmp" --exclude="logs/*.log" etc data services 2>/dev/null && log "Backup: $(du -h "$file" | cut -f1)" || err "Failed" ;;
+        list) ls -lh "${backup_dir}"/*.tar.gz 2>/dev/null | awk '{print "  " $9 " (" $5 ")"}' || echo "  (no backups)" ;;
+        restore) local file="${2:-$(ls -t "${backup_dir}"/*.tar.gz 2>/dev/null | head -1)}"
+            [ -z "$file" ] && { err "No backup specified"; return 1; }; tar xzf "$file" -C "$ANVPS_DIR" 2>/dev/null && log "Restored" || err "Failed" ;;
+        *) echo "Usage: anvps backup {create|list|restore} [file]" ;;
+    esac
+}
+
+# ──────────────────────────────────────────────
+# TUNNEL
+# ──────────────────────────────────────────────
+cmd_tunnel() {
+    local action="${1:-status}"; shift 1 2>/dev/null || true
+    [ -f "${ANVPS_SRC}/tunnels/tunnel-manager.sh" ] && bash "${ANVPS_SRC}/tunnels/tunnel-manager.sh" "$action" "$@" || err "Not installed"
+}
+
+# ──────────────────────────────────────────────
+# SECURITY
+# ──────────────────────────────────────────────
+cmd_security() {
+    local action="${1:-status}"; shift 1 2>/dev/null || true
+    case "$action" in
+        status)
+            echo ""; echo "  Security Status"; echo "  $(printf '%0.s-' {1..40})"; echo ""
+            echo "  Lockdown:    $([ -f "${ANVPS_DIR}/etc/.harden_done" ] && echo 'active' || echo 'inactive')"
+            echo "  Stealth:     $([ -f "${ANVPS_DIR}/etc/.stealth_enabled" ] && echo 'ACTIVE' || echo 'inactive')"
+            echo "  Obfuscation: $([ -f "${ANVPS_DIR}/etc/.obfuscated" ] && echo 'ACTIVE' || echo 'inactive')"
+            echo "  Encryption:  $(mountpoint -q "${ANVPS_DIR}/data/private" 2>/dev/null && echo 'active' || echo 'inactive')"
+            echo "  Tor:         $([ -f "${ANVPS_DIR}/services/tor.pid" ] && kill -0 "$(cat "${ANVPS_DIR}/services/tor.pid" 2>/dev/null)" 2>/dev/null && echo 'active' || echo 'inactive')"
+            echo "  Killswitch:  $(command -v iptables &>/dev/null && iptables -L OUTPUT 2>/dev/null | grep -q DROP && echo 'ACTIVE' || echo 'inactive')"
+            echo "  Tamper:      $([ -f "${ANVPS_DIR}/etc/.checksums" ] && echo 'active' || echo 'uninitialized')"
+            echo "" ;;
+        scan) [ -f "${ANVPS_SRC}/core/security.sh" ] && bash "${ANVPS_SRC}/core/security.sh" scan || warn "Not installed" ;;
+        harden) [ -f "${ANVPS_SRC}/core/security.sh" ] && bash "${ANVPS_SRC}/core/security.sh" harden && touch "${ANVPS_DIR}/etc/.harden_done" || warn "Not installed" ;;
+        wipe) bash "${ANVPS_SRC}/core/wipe.sh" manual "${2:-user_requested}" ;;
+        *) echo "Usage: anvps security {status|scan|harden|wipe}" ;;
+    esac
+}
+
+# ──────────────────────────────────────────────
+# STEALTH
+# ──────────────────────────────────────────────
+cmd_stealth() {
+    local action="${1:-status}"; shift 1 2>/dev/null || true
+    [ -f "${ANVPS_SRC}/core/stealth.sh" ] && bash "${ANVPS_SRC}/core/stealth.sh" "$action" "$@" || err "Stealth module not installed"
+}
+
+# ──────────────────────────────────────────────
+# OBFUSCATE
+# ──────────────────────────────────────────────
+cmd_obfuscate() {
+    local action="${1:-status}"; shift 1 2>/dev/null || true
+    [ -f "${ANVPS_SRC}/core/obfuscate.sh" ] && bash "${ANVPS_SRC}/core/obfuscate.sh" "$action" "$@" || err "Obfuscate module not installed"
+}
+
+# ──────────────────────────────────────────────
+# ENCRYPT
+# ──────────────────────────────────────────────
+cmd_encrypt() {
+    local action="${1:-status}"; shift 1 2>/dev/null || true
+    [ -f "${ANVPS_SRC}/core/encrypt.sh" ] && bash "${ANVPS_SRC}/core/encrypt.sh" "$action" "$@" || err "Encrypt module not installed"
+}
+
+# ──────────────────────────────────────────────
+# TOR
+# ──────────────────────────────────────────────
+cmd_tor() {
+    local action="${1:-status}"; shift 1 2>/dev/null || true
+    [ -f "${ANVPS_SRC}/core/tor.sh" ] && bash "${ANVPS_SRC}/core/tor.sh" "$action" "$@" || err "Tor module not installed"
+}
+
+# ──────────────────────────────────────────────
+# TAMPER
+# ──────────────────────────────────────────────
+cmd_tamper() {
+    local action="${1:-status}"; shift 1 2>/dev/null || true
+    [ -f "${ANVPS_SRC}/core/tamper.sh" ] && bash "${ANVPS_SRC}/core/tamper.sh" "$action" "$@" || err "Tamper module not installed"
+}
+
+# ──────────────────────────────────────────────
+# VPN KILLSWITCH
+# ──────────────────────────────────────────────
+cmd_killswitch() {
+    local action="${1:-status}"; shift 1 2>/dev/null || true
+    [ -f "${ANVPS_SRC}/core/vpn-killswitch.sh" ] && bash "${ANVPS_SRC}/core/vpn-killswitch.sh" "$action" "$@" || err "Killswitch module not installed"
+}
+
+# ──────────────────────────────────────────────
+# LIGHTWEIGHT / TIER
+# ──────────────────────────────────────────────
+cmd_tier() {
+    local action="${1:-detect}"; shift 1 2>/dev/null || true
+    [ -f "${ANVPS_SRC}/core/lightweight.sh" ] && bash "${ANVPS_SRC}/core/lightweight.sh" "$action" "$@" || err "Lightweight module not installed"
+}
+
+cmd_config_tier() {
+    local tier="${1:-}"
+    if [ -z "$tier" ]; then cmd_tier info; return; fi
+    local cfg="${ANVPS_DIR}/etc/anvps.conf"
+    if grep -q "^ANVPS_TIER=" "$cfg" 2>/dev/null; then sed -i "s/^ANVPS_TIER=.*/ANVPS_TIER=\"$tier\"/" "$cfg"
+    else echo "ANVPS_TIER=\"$tier\"" >> "$cfg"; fi
+    log "Tier set to $tier — restart services to apply"
+}
+
+# ──────────────────────────────────────────────
+# CONFIG
+# ──────────────────────────────────────────────
+cmd_config() {
+    local cfg="${ANVPS_DIR}/etc/anvps.conf"
+    case "${1:-show}" in
+        show) [ -f "$cfg" ] && cat "$cfg" || echo "No config found" ;;
+        get) local key="${2:-}"; [ -n "$key" ] && grep "^${key}=" "$cfg" 2>/dev/null | cut -d= -f2- || err "Specify key" ;;
+        set) local key="${2:-}"; local val="${3:-}"; [ -n "$key" ] && [ -n "$val" ] || { err "Usage: config set KEY VALUE"; return 1; }
+            if grep -q "^${key}=" "$cfg" 2>/dev/null; then sed -i "s/^${key}=.*/${key}=\"${val}\"/" "$cfg"
+            else echo "${key}=\"${val}\"" >> "$cfg"; fi; log "${key}=${val}" ;;
+        load) local profile="${2:-full}"; local pf="${ANVPS_DIR}/etc/profiles/${profile}.conf"
+            [ -f "$pf" ] && cp "$pf" "$cfg" && log "Loaded profile: $profile" || { pf="${ANVPS_SRC}/../config/profiles/${profile}.conf"; [ -f "$pf" ] && cp "$pf" "$cfg" && log "Loaded profile: $profile" || err "Profile not found: $profile"; } ;;
+        *) echo "Usage: anvps config {show|get|set|load} [key] [value]" ;;
+    esac
+}
+
+# ──────────────────────────────────────────────
+# LOGS
+# ──────────────────────────────────────────────
+cmd_logs() {
+    local service="${1:-}"; local lines="${2:-50}"
+    if [ -n "$service" ]; then
+        local logf="${ANVPS_DIR}/logs/${service}.log"
+        [ -f "$logf" ] && tail -n "$lines" "$logf" || err "No logs for '$service'"
+    else echo "Available logs:"; ls -lh "${ANVPS_DIR}/logs/"*.log 2>/dev/null | awk '{print "  " $9 " (" $5 ")"}' || echo "  (none)"; fi
+}
+
+# ──────────────────────────────────────────────
+# DOCTOR
+# ──────────────────────────────────────────────
+cmd_doctor() {
+    echo "  AnVPS Diagnostic"; echo "  $(printf '%0.s-' {1..40})"; echo ""
+    local checks=0 passed=0
+    check() { checks=$((checks+1)); if "$@" &>/dev/null; then echo "  [PASS] $*"; passed=$((passed+1)); else echo "  [FAIL] $*"; fi; }
+    check test -d "$ANVPS_DIR"; check test -f "${ANVPS_DIR}/etc/anvps.conf"; check command -v bash; check command -v curl
+    for pidf in "${ANVPS_DIR}/services"/*.pid; do [ -f "$pidf" ] || continue; local pid=$(cat "$pidf"); check kill -0 "$pid" 2>/dev/null; done
+    echo ""; echo "  Results: $passed/$checks"
+}
+
+# ──────────────────────────────────────────────
+# HELP
+# ──────────────────────────────────────────────
+cmd_help() {
+    echo "  AnVPS v${ANVPS_VERSION} — Android VPS Management"; echo ""
+    echo "  Usage: anvps <command> [options]"; echo ""
+    echo "  Core:"; echo "    status              Show system status"
+    echo "    service             Manage services (list|install|start|stop|restart|setup)"
+    echo "    monitor [interval]  Live resource monitor"
+    echo "    update              Run auto-updates"
+    echo "    backup              Backup management (create|list|restore)"
+    echo "    logs [service] [n]  View logs"
+    echo "    doctor              Run diagnostics"
+    echo ""
+    echo "  Networking:"; echo "    tunnel              Tunnel management (start|stop|status)"
+    echo "    tor                 Tor gateway (start|stop|status)"
+    echo "    killswitch          VPN kill switch (enable|disable|status|test)"
+    echo ""
+    echo "  Security:"; echo "    security            Security tools (status|scan|harden|wipe)"
+    echo "    stealth             Stealth mode (enable|disable|status)"
+    echo "    obfuscate           Device obfuscation (all|hostname|ssh|mac|http|status)"
+    echo "    encrypt             Encrypted storage (init|unmount|status)"
+    echo "    tamper              Tamper detection (init|verify|check|status)"
+    echo ""
+    echo "  Config:"; echo "    config              Configuration (show|get|set|load)"
+    echo "    tier                RAM tier detection (detect|info|select-ssh|select-httpd)"
+    echo "    help                This help"
+    echo "    version             Show version"
+}
+
+# ──────────────────────────────────────────────
+# MAIN
+# ──────────────────────────────────────────────
+main() {
+    ensure_dir; load_config
+    [ $# -eq 0 ] && { cmd_status; return; }
+    local cmd="${1:-}"; shift 1 2>/dev/null || true
+    case "$cmd" in
+        status|service|monitor|update|backup|tunnel|logs|doctor|version|help)
+            "cmd_$cmd" "$@" ;;
+        security|stealth|obfuscate|encrypt|tor|tamper|killswitch|tier)
+            "cmd_$cmd" "$@" ;;
+        config) cmd_config "$@" ;;
+        --help|-h) cmd_help ;;
+        *) err "Unknown: $cmd"; echo ""; cmd_help ;;
+    esac
+}
+
+main "$@"

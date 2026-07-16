@@ -1,0 +1,35 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AnVPS</title><style>body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,sans-serif;margin:20px;line-height:1.6}.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:12px}h1{font-size:20px;margin:0 0 4px 0}.sub{color:#8b949e;font-size:13px}.val{font-size:28px;font-weight:600}.grn{color:#3fb950}.ylw{color:#d29922}.blu{color:#58a6ff}.red{color:#f85149}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #21262d;font-size:14px}.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}.badge.on{background:rgba(63,185,80,.15);color:#3fb950;border:1px solid rgba(63,185,80,.3)}.badge.off{background:rgba(139,148,158,.15);color:#8b949e;border:1px solid #30363d}.logs{background:#010409;border:1px solid #30363d;border-radius:6px;padding:12px;font-family:monospace;font-size:12px;max-height:300px;overflow-y:auto}.logs div{color:#8b949e}.logs .warn{color:#d29922}.logs .err{color:#f85149}a{color:#58a6ff;text-decoration:none}select,input{background:#010409;border:1px solid #30363d;color:#c9d1d9;padding:6px 12px;border-radius:6px;font-size:13px;margin:4px}button{background:#2ea043;color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px}button:hover{background:#2c974b}</style></head><body>
+<h1>AnVPS <span class="sub" id="hostname"></span></h1>
+<div class="sub" id="uptime"></div>
+<div class="grid">
+  <div class="card"><div class="sub">CPU</div><div class="val grn" id="cpu">-</div></div>
+  <div class="card"><div class="sub">Memory</div><div class="val ylw" id="mem">-</div></div>
+  <div class="card"><div class="sub">Disk</div><div class="val blu" id="disk">-</div></div>
+  <div class="card"><div class="sub">Services</div><div class="val" id="svc">0</div></div>
+</div>
+<div class="card"><h3>Services</h3><div id="svcList">Loading...</div></div>
+<div class="card"><h3>Logs <select id="logSvc" onchange="getLogs()"></select></h3><div class="logs" id="logs">Select a service</div></div>
+<script>
+async function get(url){try{let r=await fetch(url);return await r.json()}catch(e){return{}}}
+async function refresh(){
+  let s=await get('/api/status');
+  if(s.cpu) document.getElementById('cpu').textContent=s.cpu;
+  if(s.memory) document.getElementById('mem').textContent=s.memory.split(/\s+/).slice(0,2).join(' ');
+  if(s.disk) document.getElementById('disk').textContent=s.disk.split(/\s+/).slice(0,2).join(' ');
+  if(s.hostname) document.getElementById('hostname').textContent='— '+s.hostname;
+  if(s.uptime) document.getElementById('uptime').textContent=s.uptime;
+  let sl=document.getElementById('svcList');
+  if(s.services&&s.services.length){
+    sl.innerHTML=s.services.map(x=>'<div class="row"><span>'+x.name+'</span><span class="badge '+(x.status==='running'?'on':'off')+'">'+x.status+'</span></div>').join('');
+    document.getElementById('svc').textContent=s.services.filter(x=>x.status==='running').length;
+  }else sl.innerHTML='<div class="sub">No services</div>';
+  let sel=document.getElementById('logSvc');
+  if(s.services){sel.innerHTML='<option value="">Select...</option>'+s.services.map(x=>'<option value="'+x.name+'">'+x.name+'</option>').join('');}
+}
+async function getLogs(){
+  let svc=document.getElementById('logSvc').value;if(!svc){document.getElementById('logs').innerHTML='Select a service';return;}
+  let d=await get('/api/logs/'+svc+'?lines=30');
+  document.getElementById('logs').innerHTML=(d.lines||[]).map(l=>'<div>'+l.replace(/</g,'&lt;')+'</div>').join('');
+}
+refresh();setInterval(refresh,5000);
+</script></body></html>

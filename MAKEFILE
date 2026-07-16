@@ -1,0 +1,38 @@
+# AnVPS Makefile
+.PHONY: install test lint clean docs help
+
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+install: ## Install AnVPS on local device
+	@bash setup/install.sh
+
+bootstrap: ## Bootstrap Termux environment
+	@bash setup/bootstrap.sh
+
+test: ## Run all unit tests
+	@bash tests/unit/test_install.sh
+
+lint: ## Check bash syntax on all scripts
+	@find . -name '*.sh' -type f -exec bash -n {} \; && echo "All scripts pass syntax check"
+
+security: ## Run security audit on the project
+	@bash setup/install.sh --check 2>/dev/null || true
+	@echo "Running shellcheck..."
+	@command -v shellcheck >/dev/null 2>&1 && find . -name '*.sh' -type f -exec shellcheck -x {} \; || echo "shellcheck not installed, skipping"
+
+clean: ## Remove temporary files
+	@find . -name '*.log' -type f -delete
+	@find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+	@echo "Cleaned"
+
+docs: ## Generate documentation
+	@echo "Documentation available in docs/ directory"
+	@ls docs/
+
+count: ## Count lines of code
+	@echo "Project statistics:"
+	@find . -name '*.sh' -type f | xargs wc -l | tail -1
+	@find . -name '*.py' -type f | xargs wc -l 2>/dev/null | tail -1 || echo "No Python files"
+	@echo "---"
+	@find . -type f | wc -l | xargs echo "Total files:"
