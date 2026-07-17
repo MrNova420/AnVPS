@@ -45,9 +45,12 @@ update_packages() {
         log "Updating APK packages..."
         apk update 2>/dev/null && apk upgrade 2>/dev/null && updated=$((updated + 1)) || true
     fi
-    if command -v pip3 &>/dev/null; then
+    local pip_cmd=""
+    if command -v pip3 &>/dev/null; then pip_cmd="pip3"
+    elif command -v pip &>/dev/null; then pip_cmd="pip"; fi
+    if [ -n "$pip_cmd" ]; then
         log "Updating Python packages..."
-        pip3 install --upgrade --user anvps 2>/dev/null || true
+        $pip_cmd install --upgrade --user anvps 2>/dev/null || $pip_cmd install --upgrade anvps 2>/dev/null || true
     fi
     return $updated
 }

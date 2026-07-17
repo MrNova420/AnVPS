@@ -92,10 +92,10 @@ setup() {
         echo "Encryption tool already installed: $tool"
         return 0
     fi
-    if command -v apt &>/dev/null; then
-        sudo apt install -y gocryptfs 2>/dev/null || sudo apt install -y encfs 2>/dev/null || true
-    elif command -v pkg &>/dev/null; then
+    if [ -n "${TERMUX_VERSION:-}" ] && command -v pkg &>/dev/null; then
         pkg install -y gocryptfs 2>/dev/null || pkg install -y encfs 2>/dev/null || true
+    elif command -v apt &>/dev/null && command -v sudo &>/dev/null; then
+        sudo apt install -y gocryptfs 2>/dev/null || sudo apt install -y encfs 2>/dev/null || true
     fi
     tool=$(detect_tool)
     if [ -n "$tool" ]; then
