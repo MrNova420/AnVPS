@@ -80,22 +80,23 @@ install_dependencies() {
     local extra=""
 
     [ "$TIER" = "shadow" ] && ssh_pkg="dropbear"
-    [ "$TIER" != "shadow" ] && extra="$extra python3 python3-pip supervisor"
+    [ "$TIER" != "shadow" ] && extra="$extra python"
+    local termux_extra="procps iproute2 net-tools coreutils util-linux"
 
     case "$PKG_MGR" in
         pkg)
             pkg update -y 2>/dev/null || true
-            pkg install -y $base_pkgs $ssh_pkg cronie termux-services termux-tools proot-distro sqlite $extra 2>/dev/null || true
+            pkg install -y $base_pkgs $ssh_pkg cronie termux-services termux-tools proot-distro sqlite $extra $termux_extra 2>/dev/null || true
             if [ "$TIER" = "shadow" ]; then pkg install -y busybox dropbear 2>/dev/null || true; fi
             ;;
         apt)
             apt update -y 2>/dev/null || true
-            apt install -y $base_pkgs $ssh_pkg cron $extra ufw sqlite3 2>/dev/null || true
+            apt install -y $base_pkgs $ssh_pkg cron $extra $termux_extra ufw sqlite3 2>/dev/null || true
             if [ "$TIER" = "shadow" ]; then apt install -y busybox dropbear 2>/dev/null || true; fi
             ;;
         apk)
             apk update 2>/dev/null || true
-            apk add $base_pkgs $ssh_pkg dcron $extra sqlite 2>/dev/null || true
+            apk add $base_pkgs $ssh_pkg dcron $extra $termux_extra sqlite 2>/dev/null || true
             if [ "$TIER" = "shadow" ]; then apk add busybox dropbear 2>/dev/null || true; fi
             ;;
     esac
@@ -119,6 +120,11 @@ deploy_self() {
     if [ -d "$SCRIPT_DIR/../src" ]; then
         cp -r "$SCRIPT_DIR/../src/"* "$ANVPS_SRC/"
         cp -r "$SCRIPT_DIR/../config/"* "${ANVPS_DIR}/etc/" 2>/dev/null || true
+        mkdir -p "${ANVPS_DIR}/setup"
+        if [ -f "$SCRIPT_DIR/uninstall.sh" ]; then
+            cp "$SCRIPT_DIR/uninstall.sh" "${ANVPS_DIR}/setup/uninstall.sh"
+            chmod +x "${ANVPS_DIR}/setup/uninstall.sh"
+        fi
         log "Deployed from local source"
     else
         warn "No local source — installing from repo is not yet implemented in standalone mode"

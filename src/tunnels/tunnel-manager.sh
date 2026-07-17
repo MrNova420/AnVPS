@@ -22,6 +22,18 @@ load_config() {
     : "${BORE_PORT:=7890}"
 }
 
+test_binary() {
+    local bin="$1" name="$2"
+    if [ ! -f "$bin" ]; then return 1; fi
+    if "$bin" --version 2>/dev/null || "$bin" version 2>/dev/null || "$bin" --help 2>/dev/null | head -1; then
+        return 0
+    else
+        warn "$name binary at $bin cannot execute — incompatible with this platform"
+        rm -f "$bin"
+        return 1
+    fi
+}
+
 start_cloudflare() {
     local cloudflared_bin="${TUNNEL_DIR}/cloudflared"
     if [ ! -f "$cloudflared_bin" ]; then
@@ -34,6 +46,7 @@ start_cloudflare() {
         local url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}"
         curl -sL "$url" -o "$cloudflared_bin" 2>/dev/null || { err "Cloudflare install failed"; return 1; }
         chmod +x "$cloudflared_bin"
+        test_binary "$cloudflared_bin" "cloudflared" || return 1
     fi
 
     local pid_file="${ANVPS_DIR}/services/cloudflared.pid"
@@ -66,6 +79,7 @@ start_ngrok() {
         local url="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-${arch}.tgz"
         curl -sL "$url" -o "/tmp/ngrok.tgz" && tar xzf "/tmp/ngrok.tgz" -C "$TUNNEL_DIR" && rm -f "/tmp/ngrok.tgz"
         chmod +x "$ngrok_bin"
+        test_binary "$ngrok_bin" "ngrok" || return 1
     fi
 
     local pid_file="${ANVPS_DIR}/services/ngrok.pid"
@@ -102,6 +116,7 @@ start_bore() {
         local ver=$(curl -s https://api.github.com/repos/ekzhang/bore/releases/latest 2>/dev/null | grep tag_name | cut -d'"' -f4 || echo "v0.5.2")
         curl -sL "https://github.com/ekzhang/bore/releases/download/${ver}/bore-${arch}" -o "$bore_bin"
         chmod +x "$bore_bin"
+        test_binary "$bore_bin" "bore" || return 1
     fi
 
     local pid_file="${ANVPS_DIR}/services/bore.pid"

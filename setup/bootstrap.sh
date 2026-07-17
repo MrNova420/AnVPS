@@ -40,11 +40,13 @@ install_termux_packages() {
         termux-auth
         nano vim
         htop
-        tmux screen
+        tmux
+        screen
         rsync
         sqlite
         openssl-tool
         resolv-conf
+        procps iproute2 net-tools coreutils util-linux
     )
 
     pkg update -y

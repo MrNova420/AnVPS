@@ -37,10 +37,19 @@ install_ssh() {
     fi
 
     if command -v sshd &>/dev/null; then
-        sshd -t 2>/dev/null && {
-            sshd 2>/dev/null || true
-            log "SSH server started on port $SSH_PORT"
-        } || warn "SSH config has errors"
+        if sshd -t 2>/dev/null; then
+            sshd -D 2>/dev/null &
+            local sshd_pid=$!
+            sleep 1
+            if kill -0 "$sshd_pid" 2>/dev/null; then
+                log "SSH server started on port $SSH_PORT (PID $sshd_pid)"
+            else
+                sshd 2>/dev/null || true
+                log "SSH server started on port $SSH_PORT"
+            fi
+        else
+            warn "SSH config has errors"
+        fi
     fi
 
     echo "$SSH_PORT" > "${ANVPS_DIR}/etc/ssh.port"

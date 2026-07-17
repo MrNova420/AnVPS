@@ -36,7 +36,7 @@ cmd_cleanup() {
 
     local before=$(du -sb "${ANVPS_DIR}" 2>/dev/null | cut -f1)
 
-    find "${LOG_DIR}" -name "*.log" -size +5M -exec truncate -s 0 {} \; 2>/dev/null && freed=$((freed + 1))
+    find "${LOG_DIR}" -name "*.log" -size +5M -exec sh -c '> "$1"' _ {} \; 2>/dev/null && freed=$((freed + 1))
     find "${LOG_DIR}" -name "*.old" -delete 2>/dev/null && freed=$((freed + 1))
     find "${ANVPS_DIR}/tmp" -type f -atime +1 -delete 2>/dev/null && freed=$((freed + 1))
 

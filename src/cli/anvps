@@ -309,12 +309,13 @@ cmd_help() {
 # MAIN
 # ──────────────────────────────────────────────
 cmd_uninstall() {
-    if [ -f "${ANVPS_DIR}/../setup/uninstall.sh" ]; then
-        bash "${ANVPS_DIR}/../setup/uninstall.sh"
+    local uninstall_sh="${ANVPS_DIR}/setup/uninstall.sh"
+    if [ -f "$uninstall_sh" ]; then
+        bash "$uninstall_sh"
     elif [ -f "$(dirname "$0")/../../setup/uninstall.sh" ]; then
         bash "$(dirname "$0")/../../setup/uninstall.sh"
     else
-        warn "Uninstaller not found — remove ${ANVPS_DIR} manually"
+        warn "Uninstaller not found at $uninstall_sh — remove ${ANVPS_DIR} manually"
     fi
 }
 

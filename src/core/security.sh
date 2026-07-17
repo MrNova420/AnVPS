@@ -97,8 +97,8 @@ cmd_scan() {
     }
 
     check_updates() {
-        if command -v apt &>/dev/null; then
-            local updates=$(apt list --upgradable 2>/dev/null | grep -c upgradable || echo 0)
+        if command -v apt-get &>/dev/null; then
+            local updates=$(apt-get --just-print upgrade 2>/dev/null | grep -c "^Inst " || echo 0)
             if [ "$updates" -gt 0 ]; then
                 echo "INFO: $updates package updates available" >> "$report"
             fi
