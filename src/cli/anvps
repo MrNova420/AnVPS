@@ -283,10 +283,15 @@ cmd_doctor() {
 # ──────────────────────────────────────────────
 # HELP
 # ──────────────────────────────────────────────
+cmd_version() {
+    echo "AnVPS v${ANVPS_VERSION}"
+}
+
 cmd_help() {
     echo "  AnVPS v${ANVPS_VERSION} — Android VPS Management"; echo ""
     echo "  Usage: anvps <command> [options]"; echo ""
-    echo "  Core:"; echo "    status              Show system status"
+    echo "  Core:"; echo "    version             Show version"
+    echo "    status              Show system status"
     echo "    service             Manage services (list|install|start|stop|restart|setup)"
     echo "    monitor [interval]  Live resource monitor"
     echo "    update              Run auto-updates"

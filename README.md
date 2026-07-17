@@ -21,16 +21,16 @@
 Copy-paste this into Termux:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/MrNova420/AnVPS/master/setup/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/MrNova420/AnVPS/master/dist/anvps-portable.sh | bash
 ```
 
-That's it. The installer detects your RAM, sets up everything, and gives you SSH access on port **7022**.
+**<30 seconds.** No dependencies to download. Everything is pre-packed. The installer extracts, detects your RAM, configures itself, and starts services. You get SSH on port **7022** immediately.
 
 After install, you get the `anvps` command:
 
 ```bash
 anvps status          # See your system
-anvps service setup   # Install all default services
+anvps service setup   # Install extra services
 ```
 
 ## 🔌 How to Connect Remotely

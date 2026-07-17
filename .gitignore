@@ -22,7 +22,6 @@ Thumbs.db
 *.tar.gz
 *.tgz
 *.zip
-dist/
 build/
 
 # Python

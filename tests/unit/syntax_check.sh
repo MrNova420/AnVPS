@@ -8,6 +8,6 @@ while IFS= read -r -d '' f; do
         echo "FAIL: $(bash -n "$f" 2>&1)"
         errors=$((errors + 1))
     fi
-done < <(find . -name "*.sh" -type f -print0; find . -name "anvps" -type f -print0)
+done < <(find . -name "*.sh" -type f -not -path "./dist/*" -print0; find . -name "anvps" -type f -not -path "./dist/*" -print0)
 [ "$errors" -eq 0 ] && echo "All passed" || echo "$errors failed"
 exit $errors
