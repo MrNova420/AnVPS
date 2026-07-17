@@ -72,8 +72,15 @@ cmd_service() {
         install)
             local name="${1:-}"
             if [ -z "$name" ]; then err "Specify a service"; return 1; fi
-            local installer="${ANVPS_SRC}/setup/modules/${name}.sh"
-            if [ -f "$installer" ]; then source "$installer"; "install_${name}" "${ENV_TYPE:-termux}" "$ANVPS_DIR"
+            local installer="${ANVPS_DIR}/setup/modules/${name}.sh"
+            local mod_name="$name"
+            case "$name" in
+                web) mod_name="webserver" ;;
+                files) mod_name="file-server" ;;
+                code-server) mod_name="code-server" ;;
+            esac
+            installer="${ANVPS_DIR}/setup/modules/${mod_name}.sh"
+            if [ -f "$installer" ]; then source "$installer"; "install_${mod_name//-/_}" "${ENV_TYPE:-termux}" "$ANVPS_DIR"
             else err "No installer for '$name'"; fi
             ;;
         start|stop|restart)
@@ -86,7 +93,7 @@ cmd_service() {
                 else warn "$name not running"; fi
             else cmd_service stop "$name"; sleep 1; cmd_service start "$name"; fi
             ;;
-        setup) log "Running initial service setup..."; for svc in ssh web database files code-server; do local installer="${ANVPS_SRC}/setup/modules/${svc}.sh"; [ -f "$installer" ] && source "$installer" && "install_${svc}" "${ENV_TYPE:-termux}" "$ANVPS_DIR" 2>/dev/null || true; done; log "Initial setup complete" ;;
+        setup) log "Running initial service setup..."; for svc in ssh webserver database file-server code-server; do local installer="${ANVPS_DIR}/setup/modules/${svc}.sh"; local fn="install_${svc//-/_}"; [ -f "$installer" ] && source "$installer" && "$fn" "${ENV_TYPE:-termux}" "$ANVPS_DIR" 2>/dev/null || true; done; log "Initial setup complete" ;;
         *) echo "Usage: anvps service {list|install|start|stop|restart|setup} [name]" ;;
     esac
 }

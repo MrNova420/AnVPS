@@ -78,20 +78,16 @@ poll() {
     while true; do
         if [ -z "$TOKEN" ]; then sleep 30; continue; fi
         local resp=$(curl -s "https://api.telegram.org/bot${TOKEN}/getUpdates?offset=$LAST_UPDATE&timeout=10" 2>/dev/null || echo '{"result":[]}')
-        local count=$(echo "$resp" | grep -o '"update_id":[0-9]*' | wc -l)
-        if [ "$count" -gt 0 ]; then
-            local ids=($(echo "$resp" | grep -o '"update_id":[0-9]*' | cut -d: -f2))
-            local texts=($(echo "$resp" | grep -o '"text":"[^"]*"' | cut -d'"' -f4))
-            local chats=($(echo "$resp" | grep -o '"chat":{"id":[0-9-]*' | cut -d: -f3))
-            for i in $(seq 0 $((count - 1))); do
-                [ -z "${ids[$i]:-}" ] && continue
-                [ "${ids[$i]}" -ge "$LAST_UPDATE" ] && LAST_UPDATE=$((ids[$i] + 1))
-                local text="${texts[$i]:-}"
-                local chat="${chats[$i]:-}"
-                [ -z "$text" ] && [ -z "$chat" ] && continue
-                process_update "$text" "$chat"
-            done
-        fi
+        local updates=$(echo "$resp" | sed 's/{"update_id":/\n{"update_id":/g' | grep '{"update_id":' || true)
+        while IFS= read -r item; do
+            [ -z "$item" ] && continue
+            local id=$(echo "$item" | sed 's/.*"update_id":\([0-9]*\).*/\1/')
+            [ -z "$id" ] && continue
+            [ "$id" -ge "$LAST_UPDATE" ] && LAST_UPDATE=$((id + 1))
+            local text=$(echo "$item" | sed 's/.*"text":"//; s/","[a-z_]".*//; s/\\"/"/g; s/"}].*//')
+            local chat=$(echo "$item" | sed 's/.*"chat":{"id":\([0-9-]*\).*/\1/')
+            [ -n "$text" ] && [ -n "$chat" ] && process_update "$text" "$chat"
+        done <<< "$updates"
         sleep 3
     done
 }

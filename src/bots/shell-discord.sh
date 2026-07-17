@@ -83,21 +83,18 @@ poll() {
         [ -n "$LAST_MESSAGE_ID" ] && params="$params&after=$LAST_MESSAGE_ID"
         local resp=$(curl -s "${API}/channels/${CHANNEL_ID}/messages?${params}" \
             -H "Authorization: Bot ${TOKEN}" 2>/dev/null || echo '[]')
-        local count=$(echo "$resp" | grep -o '"id":"[0-9]*"' | wc -l)
-        if [ "$count" -gt 0 ]; then
-            local ids=($(echo "$resp" | grep -o '"id":"[0-9]*"' | cut -d'"' -f4))
-            local contents=($(echo "$resp" | grep -o '"content":"[^"]*"' | cut -d'"' -f4))
-            local authors=($(echo "$resp" | grep -o '"username":"[^"]*"' | cut -d'"' -f4))
-            for i in $(seq 0 $((count - 1))); do
-                [ -z "${ids[$i]:-}" ] && continue
-                [ "${ids[$i]}" = "$LAST_MESSAGE_ID" ] && continue
-                [ "${authors[$i]:-}" = "AnVPS Bot" ] && continue
-                LAST_MESSAGE_ID="${ids[$i]}"
-                local content="${contents[$i]:-}"
-                [ -z "$content" ] && continue
-                process_command "$content"
-            done
-        fi
+        local items=$(echo "$resp" | sed 's/{"id":"/\n{"id":"/g' | grep '{"id":"' || true)
+        while IFS= read -r item; do
+            [ -z "$item" ] && continue
+            local id=$(echo "$item" | sed 's/.*"id":"\([0-9]*\)".*/\1/')
+            local author=$(echo "$item" | sed 's/.*"username":"\([^"]*\)".*/\1/')
+            [ -z "$id" ] && continue
+            [ "$id" = "$LAST_MESSAGE_ID" ] && continue
+            [ "$author" = "AnVPS Bot" ] && continue
+            LAST_MESSAGE_ID="$id"
+            local content=$(echo "$item" | sed 's/.*"content":"//; s/","[a-z_]".*//; s/\\"/"/g; s/"}].*//')
+            [ -n "$content" ] && process_command "$content"
+        done <<< "$items"
         sleep 3
     done
 }

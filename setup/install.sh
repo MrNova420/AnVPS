@@ -81,7 +81,7 @@ install_dependencies() {
 
     [ "$TIER" = "shadow" ] && ssh_pkg="dropbear"
     [ "$TIER" != "shadow" ] && extra="$extra python"
-    local termux_extra="procps iproute2 net-tools coreutils util-linux"
+    local termux_extra="procps iproute2 net-tools coreutils util-linux dnsutils"
 
     case "$PKG_MGR" in
         pkg)
@@ -100,6 +100,15 @@ install_dependencies() {
             if [ "$TIER" = "shadow" ]; then apk add busybox dropbear 2>/dev/null || true; fi
             ;;
     esac
+
+    log "Installing Python packages..."
+    local pip_cmd=""
+    if command -v pip &>/dev/null; then pip_cmd="pip"
+    elif command -v pip3 &>/dev/null; then pip_cmd="pip3"; fi
+    if [ -n "$pip_cmd" ] && [ "$TIER" != "shadow" ]; then
+        $pip_cmd install fastapi uvicorn 2>/dev/null || true
+    fi
+
     log "Base dependencies installed ($TIER mode)"
 }
 
@@ -124,6 +133,10 @@ deploy_self() {
         if [ -f "$SCRIPT_DIR/uninstall.sh" ]; then
             cp "$SCRIPT_DIR/uninstall.sh" "${ANVPS_DIR}/setup/uninstall.sh"
             chmod +x "${ANVPS_DIR}/setup/uninstall.sh"
+        fi
+        if [ -d "$SCRIPT_DIR/modules" ]; then
+            cp -r "$SCRIPT_DIR/modules" "${ANVPS_DIR}/setup/modules"
+            chmod -R +x "${ANVPS_DIR}/setup/modules" 2>/dev/null || true
         fi
         log "Deployed from local source"
     else
@@ -164,10 +177,18 @@ CONFEOF
 
     ln -sf "${ANVPS_SRC}/cli/anvps" "${ANVPS_DIR}/anvps" 2>/dev/null || true
 
+    local symlink_target=""
     if [ -d "/data/data/com.termux/files/usr/bin" ]; then
-        ln -sf "${ANVPS_SRC}/cli/anvps" "/data/data/com.termux/files/usr/bin/anvps" 2>/dev/null || true
+        symlink_target="/data/data/com.termux/files/usr/bin/anvps"
     elif [ -d "/usr/local/bin" ]; then
-        ln -sf "${ANVPS_SRC}/cli/anvps" "/usr/local/bin/anvps" 2>/dev/null || true
+        symlink_target="/usr/local/bin/anvps"
+    fi
+    if [ -n "$symlink_target" ]; then
+        if ln -sf "${ANVPS_SRC}/cli/anvps" "$symlink_target" 2>/dev/null; then
+            log "Symlink created: $symlink_target"
+        else
+            warn "Could not create symlink at $symlink_target — run 'anvps' from ${ANVPS_SRC}/cli/anvps"
+        fi
     fi
 }
 
