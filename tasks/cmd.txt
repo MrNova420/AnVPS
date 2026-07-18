@@ -1,0 +1,5 @@
+# AnVPS Task File
+# Increment TASK_ID to trigger a new task
+# All lines after TASK_ID= are executed as bash commands
+TASK_ID=0
+echo "Agent ready"
