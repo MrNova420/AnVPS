@@ -38,3 +38,7 @@ package-lock.json
 
 # AnVPS runtime (generated on target device)
 ~/.anvps/
+
+debug*.ps1
+debug*.py
+debug*.sh
