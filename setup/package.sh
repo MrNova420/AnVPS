@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 log()  { echo -e "${GREEN}[+]${NC} $1"; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -30,14 +30,10 @@ collect_files() {
 generate_installer() {
     local tmpdir="$1"
     local archive="$tmpdir/payload.tar.gz"
-
     tar czf "$archive" -C "$tmpdir" . 2>/dev/null
-    local b64data
-    b64data=$(base64 -w0 < "$archive" 2>/dev/null || openssl base64 -A < "$archive" 2>/dev/null || base64 -b 0 < "$archive")
-
+    local b64data=$(base64 -w0 < "$archive" 2>/dev/null || openssl base64 -A < "$archive" 2>/dev/null || base64 -b 0 < "$archive")
     mkdir -p "$(dirname "$OUT_FILE")"
 
-    # Write script header (quoted heredoc = no expansion)
     cat > "$OUT_FILE" << 'HEADER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -48,62 +44,115 @@ log()  { echo -e "${GREEN}[+]${NC} $1"; }
 warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 err()  { echo -e "${RED}[x]${NC} $1"; }
 
+detect_env() {
+    if [ -n "${TERMUX_VERSION:-}" ]; then
+        echo "termux"; return
+    fi
+    command -v apt &>/dev/null && echo "debian" && return
+    command -v apk &>/dev/null && echo "alpine" && return
+    echo "unknown"
+}
+
+check_tools() {
+    local missing=""
+    command -v base64 &>/dev/null || missing="$missing base64"
+    command -v tar &>/dev/null || missing="$missing tar"
+    command -v curl &>/dev/null || missing="$missing curl"
+    command -v tr &>/dev/null || missing="$missing tr"
+    if [ -n "$missing" ]; then
+        local env=$(detect_env)
+        if [ "$env" = "termux" ]; then
+            log "Installing missing tools:$missing"
+            pkg install -y coreutils tar curl 2>/dev/null || true
+        elif [ "$env" = "debian" ]; then
+            apt update -qq 2>/dev/null || true
+            apt install -y coreutils tar curl 2>/dev/null || true
+        else
+            err "Missing tools:$missing — install coreutils, tar, curl"
+            exit 1
+        fi
+    fi
+}
+
 extract_payload() {
     local tmpdir=$(mktemp -d)
     local archive="$tmpdir/payload.tar.gz"
-    echo "$PAYLOAD_B64" > "$archive.tmp"
-    tr -d '[:space:]' < "$archive.tmp" > "$archive.b64"
-    base64 -d < "$archive.b64" > "$archive" 2>/dev/null || openssl base64 -d < "$archive.b64" > "$archive" 2>/dev/null || {
-        err "base64 decode failed -- install coreutils (pkg install coreutils)"
-        rm -rf "$tmpdir"
-        exit 1
+    echo "$PAYLOAD_B64" | tr -d '[:space:]' | base64 -d > "$archive" 2>/dev/null || echo "$PAYLOAD_B64" | tr -d '[:space:]' | openssl base64 -d > "$archive" 2>/dev/null || {
+        err "base64 decode failed"
+        rm -rf "$tmpdir"; exit 1
     }
-    rm -f "$archive.tmp" "$archive.b64"
     tar xzf "$archive" -C "$tmpdir" 2>/dev/null || {
         err "tar extraction failed"
-        rm -rf "$tmpdir"
-        exit 1
+        rm -rf "$tmpdir"; exit 1
     }
     rm -f "$archive"
     echo "$tmpdir"
 }
 
+install_packages() {
+    local env=$(detect_env)
+    local tier="${1:-full}"
+    log "Installing packages ($tier mode)..."
+    local base_pkgs="curl wget git openssh"
+    local extra_pkg=""
+    local python_pkg="python"
+    local termux_extras="procps iproute2 net-tools coreutils util-linux dnsutils"
+
+    [ "$tier" = "shadow" ] && base_pkgs="curl wget dropbear"
+    [ "$tier" != "shadow" ] && extra_pkg="$python_pkg"
+
+    case "$env" in
+        termux)
+            pkg update -y 2>/dev/null || true
+            pkg install -y $base_pkgs $extra_pkg cronie termux-services sqlite $termux_extras 2>/dev/null || true
+            [ "$tier" = "shadow" ] && pkg install -y busybox 2>/dev/null || true
+            ;;
+        debian)
+            apt update -qq 2>/dev/null || true
+            apt install -y $base_pkgs $extra_pkg cron sqlite3 ufw 2>/dev/null || true
+            ;;
+        alpine)
+            apk update 2>/dev/null || true
+            apk add $base_pkgs $extra_pkg dcron sqlite 2>/dev/null || true
+            ;;
+    esac
+
+    if [ "$tier" != "shadow" ]; then
+        for pip_cmd in pip pip3; do
+            command -v "$pip_cmd" &>/dev/null && {
+                log "Installing Python packages..."
+                $pip_cmd install fastapi uvicorn 2>/dev/null || true
+                break
+            }
+        done
+    fi
+
+    log "Packages installed"
+}
+
 install_from_payload() {
     local payload_dir="$1"
-    log "Installing AnVPS to $ANVPS_DIR..."
+    log "Deploying AnVPS to $ANVPS_DIR..."
     mkdir -p "$ANVPS_DIR"/{src/{cli/commands,core,bots,web/{backend,frontend},tunnels},setup/modules,etc/profiles,data/{databases,sites,containers},logs,services,backup,tmp,ssl,tunnels}
     cp -r "$payload_dir"/src/* "$ANVPS_DIR/src/"
     cp -r "$payload_dir"/setup/* "$ANVPS_DIR/setup/"
-    if [ -d "$payload_dir/config" ]; then
-        cp -r "$payload_dir"/config/* "$ANVPS_DIR/etc/"
-    fi
-    if [ -f "$payload_dir/README.md" ]; then
-        cp "$payload_dir/README.md" "$ANVPS_DIR/"
-    fi
+    [ -d "$payload_dir/config" ] && cp -r "$payload_dir"/config/* "$ANVPS_DIR/etc/"
+    [ -f "$payload_dir/README.md" ] && cp "$payload_dir/README.md" "$ANVPS_DIR/"
     chmod +x "$ANVPS_DIR/src/cli/anvps"
     ln -sf "$ANVPS_DIR/src/cli/anvps" "$ANVPS_DIR/anvps" 2>/dev/null || true
-    local symlink_target=""
-    if [ -d "/data/data/com.termux/files/usr/bin" ]; then
-        symlink_target="/data/data/com.termux/files/usr/bin/anvps"
-    elif [ -d "/usr/local/bin" ]; then
-        symlink_target="/usr/local/bin/anvps"
-    fi
-    if [ -n "$symlink_target" ] && [ ! -f "$symlink_target" ]; then
-        ln -sf "$ANVPS_DIR/src/cli/anvps" "$symlink_target" 2>/dev/null || warn "Could not create symlink at $symlink_target"
-    fi
-    log "Files deployed to $ANVPS_DIR"
+    local target=""
+    [ -d "/data/data/com.termux/files/usr/bin" ] && target="/data/data/com.termux/files/usr/bin/anvps"
+    [ -z "$target" ] && [ -d "/usr/local/bin" ] && target="/usr/local/bin/anvps"
+    [ -n "$target" ] && [ ! -f "$target" ] && ln -sf "$ANVPS_DIR/src/cli/anvps" "$target" 2>/dev/null || true
+    log "Files deployed"
 }
 
-detect_and_configure() {
+generate_config() {
     local conf="$ANVPS_DIR/etc/anvps.conf"
     [ -f "$conf" ] && return
-    local ENV_TYPE="unknown"
-    if [ -n "${TERMUX_VERSION:-}" ]; then ENV_TYPE="termux"
-    elif command -v apt &>/dev/null; then ENV_TYPE="linux"; fi
+    local env=$(detect_env)
     local RAM_MB=0
-    if [ -f /proc/meminfo ]; then
-        RAM_MB=$(( $(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "0") / 1024 ))
-    fi
+    [ -f /proc/meminfo ] && RAM_MB=$(( $(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "0") / 1024 ))
     local TIER="full"
     [ "$RAM_MB" -lt 64 ] && TIER="shadow"
     [ "$RAM_MB" -lt 256 ] && TIER="lite"
@@ -133,60 +182,66 @@ ANVPS_OBFUSCATE=$([ "$TIER" = "shadow" ] && echo "true" || echo "false")
 ANVPS_TAMPER_DETECTION=true
 ANVPS_TAMPER_MAX_FAILED=$([ "$TIER" = "shadow" ] && echo "5" || echo "10")
 CONFEOF
-    log "Configuration generated ($ENV_TYPE, ${RAM_MB}MB, $TIER tier)"
+    log "Configuration generated"
 }
 
 start_services() {
     log "Starting services..."
-    if [ -f "$ANVPS_DIR/src/core/supervisor.sh" ]; then
-        bash "$ANVPS_DIR/src/core/supervisor.sh" start 2>&1 || warn "Supervisor start failed -- run 'anvps service start' manually"
-    fi
+    [ -f "$ANVPS_DIR/src/core/supervisor.sh" ] && bash "$ANVPS_DIR/src/core/supervisor.sh" start 2>&1 || warn "Supervisor start had issues — run 'anvps service start' later"
 }
 
 print_summary() {
+    local anvps_cmd="anvps"
+    [ -f "/data/data/com.termux/files/usr/bin/anvps" ] || anvps_cmd="bash $ANVPS_DIR/src/cli/anvps"
     echo ""
-    echo "  AnVPS v1.0.0 -- Ready"
+    echo "  AnVPS v1.0.0 — Ready"
     echo "  ====================="
     echo "  Directory: $ANVPS_DIR"
     echo "  SSH Port:  7022"
     echo "  Web UI:    http://localhost:7080"
     echo ""
     echo "  Commands:"
-    echo "    anvps status        -- System status"
-    echo "    anvps service list  -- List services"
-    echo "    anvps help          -- All commands"
+    echo "    $anvps_cmd status        — System status"
+    echo "    $anvps_cmd service list  — List services"
+    echo "    $anvps_cmd help          — All commands"
     echo ""
 }
 
 main() {
     echo ""
-    echo "  AnVPS -- Portable Installer"
+    echo "  AnVPS — Portable Installer"
     echo "  ==========================="
+    check_tools
+    local env=$(detect_env)
+    log "Environment: $env"
     local payload_dir=$(extract_payload)
     install_from_payload "$payload_dir"
-    detect_and_configure
-    start_services
     rm -rf "$payload_dir"
+
+    local RAM_MB=0
+    [ -f /proc/meminfo ] && RAM_MB=$(( $(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "0") / 1024 ))
+    local TIER="full"
+    [ "$RAM_MB" -lt 64 ] && TIER="shadow"
+    [ "$RAM_MB" -lt 256 ] && TIER="lite"
+    [ "$RAM_MB" -lt 512 ] && TIER="standard"
+
+    generate_config
+    install_packages "$TIER"
+    start_services
     print_summary
 }
 
 PAYLOAD_B64="
 HEADER
-
-    # Write base64 payload
     echo "$b64data" >> "$OUT_FILE"
-
-    # Write footer
     cat >> "$OUT_FILE" << 'FOOTER'
 "
 main "$@"
 FOOTER
-
     chmod +x "$OUT_FILE"
     rm -rf "$tmpdir" "$archive"
-
-    local final_size=$(wc -c < "$OUT_FILE")
-    echo $((final_size / 1024))
+    local kb=$(($(wc -c < "$OUT_FILE") / 1024))
+    echo "$kb"
 }
 
 main() {
@@ -195,10 +250,8 @@ main() {
     echo "  =============================="
     local tmpdir=$(collect_files)
     local kb=$(generate_installer "$tmpdir")
-    log "Portable installer created: $OUT_FILE"
-    log "  Size: ${kb}KB"
-    log "  Usage: bash $OUT_FILE"
-    log "  Or:    curl -sSL https://raw.githubusercontent.com/MrNova420/AnVPS/master/dist/anvps-portable.sh | bash"
+    log "Built: $OUT_FILE (${kb}KB)"
+    log "Run:  bash $OUT_FILE"
     echo ""
 }
 
