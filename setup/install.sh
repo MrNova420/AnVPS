@@ -106,7 +106,11 @@ install_dependencies() {
     if command -v pip &>/dev/null; then pip_cmd="pip"
     elif command -v pip3 &>/dev/null; then pip_cmd="pip3"; fi
     if [ -n "$pip_cmd" ] && [ "$TIER" != "shadow" ]; then
-        $pip_cmd install fastapi uvicorn 2>/dev/null || true
+        if [ "$ENV_TYPE" = "termux" ]; then
+            log "Web UI uses stdlib — no pip packages needed"
+        else
+            $pip_cmd install fastapi uvicorn 2>/dev/null || true
+        fi
     fi
 
     log "Base dependencies installed ($TIER mode)"

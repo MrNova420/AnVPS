@@ -120,8 +120,12 @@ install_packages() {
     if [ "$tier" != "shadow" ]; then
         for pip_cmd in pip pip3; do
             command -v "$pip_cmd" &>/dev/null && {
-                log "Installing Python packages..."
-                $pip_cmd install fastapi uvicorn 2>/dev/null || true
+                if [ "$(detect_env)" = "termux" ]; then
+                    log "Web UI uses stdlib — no pip packages needed"
+                else
+                    log "Installing Python packages..."
+                    $pip_cmd install fastapi uvicorn 2>/dev/null || true
+                fi
                 break
             }
         done
